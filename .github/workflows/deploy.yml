@@ -1,0 +1,52 @@
+# theoreulpass.com 배포: oreumpass 저장소 main을 그대로 가져와 이 저장소의 GitHub Pages(커스텀 도메인)로 올린다.
+# 옛 주소(kellylee4513-glitch.github.io/oreumpass)는 oreumpass 저장소가 따로 서비스한다. 이 저장소는 코드 사본을 두지 않는다.
+name: deploy theoreulpass.com
+on:
+  push:
+    branches: [main]          # oreumpass/tools/sync-site.sh 가 SOURCE 파일을 바꿔 올리면 실행
+  workflow_dispatch: {}       # Actions 탭에서 손으로 실행
+  schedule:
+    - cron: '23 * * * *'      # 안전망: 매시간 oreumpass main과 다르면 다시 배포
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: oreumpass main 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: kellylee4513-glitch/oreumpass
+          ref: main
+          path: site
+      - name: 바뀐 게 있는지 확인 (매시간 실행일 때만)
+        id: check
+        run: |
+          SHA=$(git -C site rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          LIVE=$(curl -fsSL "https://theoreulpass.com/deployed.txt?t=$(date +%s)" 2>/dev/null | head -1 || true)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$LIVE" = "$SHA" ]; then echo "skip=1" >> "$GITHUB_OUTPUT"; echo "이미 최신 ($SHA)"; fi
+      - name: 올릴 파일 정리
+        if: steps.check.outputs.skip != '1'
+        run: |
+          rm -rf site/.git site/.github
+          echo "${{ steps.check.outputs.sha }}" > site/deployed.txt
+          echo "theoreulpass.com" > site/CNAME
+          echo "배포 커밋: ${{ steps.check.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/configure-pages@v5
+        if: steps.check.outputs.skip != '1'
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.check.outputs.skip != '1'
+        with:
+          path: site
+      - id: deployment
+        if: steps.check.outputs.skip != '1'
+        uses: actions/deploy-pages@v4
